@@ -1,3 +1,32 @@
+## General
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.cuo
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+
+# Compiled protocol buffers
+*.pb.h
+*.pb.cc
+*_pb2.py
+
+# Compiled python
+*.pyc
+
+# Editor temporaries
+*.swp
+*~
+
 ## Caffe
 
 # User's build configuration
@@ -21,3 +50,5 @@ examples/*
 build
 .build_debug/*
 .build_release/*
+*.bin
+python/caffe/proto/

@@ -61,6 +61,10 @@ PROTO_SRCS := $(wildcard $(PROTO_SRC_DIR)/*.proto)
 # PROTO_SRCS; PROTO_BUILD_INCLUDE_DIR will contain the .h header files
 PROTO_BUILD_DIR := $(BUILD_DIR)/$(PROTO_SRC_DIR)
 PROTO_BUILD_INCLUDE_DIR := $(BUILD_INCLUDE_DIR)/$(PROJECT)/proto
+# PY$(PROJECT)_SRC is the python wrapper for $(PROJECT)
+PY$(PROJECT)_SRC := python/$(PROJECT)/_$(PROJECT).cpp
+PY$(PROJECT)_SO := python/$(PROJECT)/_$(PROJECT).so
+PY$(PROJECT)_HXX := include/$(PROJECT)/layers/python_layer.hpp
 
 ##############################
 # Derive generated files
@@ -71,6 +75,10 @@ PROTO_GEN_HEADER_SRCS := $(addprefix $(PROTO_BUILD_DIR)/, \
 PROTO_GEN_HEADER := $(addprefix $(PROTO_BUILD_INCLUDE_DIR)/, \
 		$(notdir ${PROTO_SRCS:.proto=.pb.h}))
 PROTO_GEN_CC := $(addprefix $(BUILD_DIR)/, ${PROTO_SRCS:.proto=.pb.cc})
+PY_PROTO_BUILD_DIR := python/$(PROJECT)/proto
+PY_PROTO_INIT := python/$(PROJECT)/proto/__init__.py
+PROTO_GEN_PY := $(foreach file,${PROTO_SRCS:.proto=_pb2.py}, \
+		$(PY_PROTO_BUILD_DIR)/$(notdir $(file)))
 # The objects corresponding to the source files
 # These objects will be linked into the final shared library, so we
 # exclude the tool, example, and test objects.
@@ -142,6 +150,7 @@ ifeq ($(USE_OPENCV), 1)
 	endif
 
 endif
+PYTHON_LIBRARIES ?= boost_python python2.7
 WARNINGS := -Wall -Wno-sign-compare
 
 ##############################
@@ -150,7 +159,7 @@ WARNINGS := -Wall -Wno-sign-compare
 
 ALL_BUILD_DIRS := $(sort $(BUILD_DIR) $(addprefix $(BUILD_DIR)/, $(SRC_DIRS)) \
 	$(addprefix $(BUILD_DIR)/cuda/, $(SRC_DIRS)) \
-	$(LIB_BUILD_DIR) \
+	$(LIB_BUILD_DIR) $(PY_PROTO_BUILD_DIR) \
 	$(PROTO_BUILD_INCLUDE_DIR))
 
 ##############################
@@ -270,6 +279,12 @@ ifeq ($(CPU_ONLY), 1)
 	COMMON_FLAGS += -DCPU_ONLY
 endif
 
+# Python layer support
+ifeq ($(WITH_PYTHON_LAYER), 1)
+	COMMON_FLAGS += -DWITH_PYTHON_LAYER
+	LIBRARIES += $(PYTHON_LIBRARIES)
+endif
+
 # BLAS configuration (default = ATLAS)
 BLAS ?= atlas
 ifeq ($(BLAS), mkl)
@@ -323,17 +338,28 @@ LINKFLAGS += -pthread -fPIC $(COMMON_FLAGS) $(WARNINGS)
 
 LDFLAGS += $(foreach librarydir,$(LIBRARY_DIRS),-L$(librarydir)) \
 		$(foreach library,$(LIBRARIES),-l$(library))
+PYTHON_LDFLAGS := $(LDFLAGS) $(foreach library,$(PYTHON_LIBRARIES),-l$(library))
 
 ##############################
 # Define build targets
 ##############################
-.PHONY: all lib clean tools proto
+.PHONY: all lib clean tools proto py py$(PROJECT)
 
 all: lib tools
 
 lib: $(STATIC_NAME) $(DYNAMIC_NAME)
 
 tools: $(TOOL_BINS) $(TOOL_BIN_LINKS)
+
+py$(PROJECT): py
+
+py: $(PY$(PROJECT)_SO) $(PROTO_GEN_PY)
+
+$(PY$(PROJECT)_SO): $(PY$(PROJECT)_SRC) $(PY$(PROJECT)_HXX) | $(DYNAMIC_NAME)
+	@ echo CXX/LD -o $@ $<
+	$(Q)$(CXX) -shared -o $@ $(PY$(PROJECT)_SRC) \
+		-o $@ $(LINKFLAGS) -l$(LIBRARY_NAME) $(PYTHON_LDFLAGS) \
+		-Wl,-rpath,$(ORIGIN)/../../build/lib
 
 $(BUILD_DIR_LINK): $(BUILD_DIR)/.linked
 
@@ -397,9 +423,18 @@ $(PROTO_BUILD_DIR)/%.pb.cc $(PROTO_BUILD_DIR)/%.pb.h : \
 	@ echo PROTOC $<
 	$(Q)protoc --proto_path=$(PROTO_SRC_DIR) --cpp_out=$(PROTO_BUILD_DIR) $<
 
+$(PY_PROTO_BUILD_DIR)/%_pb2.py : $(PROTO_SRC_DIR)/%.proto \
+		$(PY_PROTO_INIT) | $(PY_PROTO_BUILD_DIR)
+	@ echo PROTOC \(python\) $<
+	$(Q)protoc --proto_path=$(PROTO_SRC_DIR) --python_out=$(PY_PROTO_BUILD_DIR) $<
+
+$(PY_PROTO_INIT): | $(PY_PROTO_BUILD_DIR)
+	touch $(PY_PROTO_INIT)
+
 clean:
 	@- $(RM) -rf $(ALL_BUILD_DIRS)
 	@- $(RM) -rf $(OTHER_BUILD_DIR)
 	@- $(RM) -rf $(BUILD_DIR_LINK)
+	@- $(RM) $(PY$(PROJECT)_SO)
 
 -include $(DEPS)
